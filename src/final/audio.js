@@ -84,7 +84,11 @@ export const initAudio = () => {
 const setupAudioContext = async () => {
   if (meyda) meyda.stop();
 
-  sourceNode = audioContext.createMediaElementSource(audioElement);
+    if (!sourceNode) {
+    sourceNode = audioContext.createMediaElementSource(audioElement);
+  } else {
+    try { sourceNode.disconnect(); } catch {}
+  }
   analyzer = audioContext.createAnalyser();
   analyzer.fftSize = 512;
 
