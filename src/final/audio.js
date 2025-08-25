@@ -1,5 +1,5 @@
-import Meyda from "meyda";
-import loadAubioModule from "aubiojs";
+import Meyda from "./meyda";
+import loadAubioModule from "./aubiojs";
 
 export const AudioData = {
   latestFeatures: null,
