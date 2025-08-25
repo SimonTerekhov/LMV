@@ -1,0 +1,35 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap');
+html, body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  height: 100%;
+  background: #1D1D1D;
+  color: whitesmoke;
+}
+*{
+  font-family: "inter", sans-serif;
+}
+canvas {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%); ;
+  height: calc(100% - 2rem);
+  aspect-ratio: 1 / 1;
+  background: black;
+  border-radius: 1rem;
+}
+#ui {
+  position: absolute;
+  top: 20px; left: 20px;
+  background: #1D1D1D;
+  padding: 10px;
+  border-radius: 0.5rem;
+  max-width: 300px;
+}
+#output {
+  overflow: auto;
+  font-size: 0.8em;
+  white-space: pre-wrap;
+}
