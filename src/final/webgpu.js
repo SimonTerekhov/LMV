@@ -99,7 +99,7 @@ const fPos = gui.addFolder("Position & Scale");
 fPos.add(controls, "baseScale", 0.5, 5, 0.01).name("Base Scale");
 fPos.add(controls, "centerOffsetX", -2, 2, 0.01).name("Center X");
 fPos.add(controls, "centerOffsetY", -2, 2, 0.01).name("Center Y");
-fPos.add({ Center: () => { controls.centerOffsetX = 0; controls.centerOffsetY = 0; } }, "Center");
+fPos.add({ Center: () => { controls.centerOffsetX = 0; controls.centerOffsetY = 0; gui.updateDisplay()} }, "Center");
 fPos.add(controls, "mirrorMode", { keyValues: { Off: 0, X: 1, Y: 2, Both: 3 } }).name("Mirror");
 
 const fRings = gui.addFolder("Rings & Blob");
@@ -138,6 +138,138 @@ const actions = { randomize: () => randomizeControls() };
 const fQuick = gui.addFolder("Quick");
 fQuick.add(actions, "randomize").name("Randomize");
 fQuick.open(true);
+
+const PK = "webgpu-viz-presets";
+const get = () => JSON.parse(localStorage.getItem(PK) || "{}");
+const set = o => localStorage.setItem(PK, JSON.stringify(o));
+const keys = () => Object.keys(get());
+const defaultName = () => { let i = 1; while (get()[`Preset ${i}`]) i++; return `Preset ${i}`; };
+const sameVals = (a, b) => !!a && !!b && Object.keys(controls).every(k => a[k] === b[k]);
+
+const parseBase = name => {
+  const m = (name || "").trim().match(/^(.*?)(?:\s+(\d+))?$/);
+  return { base: (m?.[1] || "").trim(), num: m?.[2] ? parseInt(m[2], 10) : null };
+};
+
+const nextFreeNumbered = base => {
+  const all = get(); let i = 1;
+  while (all[`${base} ${i}`]) i++;
+  return `${base} ${i}`;
+};
+
+const optMap = () => Object.fromEntries(keys().map(n => [n, n]));
+
+const ui = { name: defaultName(), selected: "" };
+let presetCtl;
+const rebuildSelect = (val = "") => {
+  try { presetCtl && f.remove && f.remove(presetCtl); } catch {}
+  presetCtl = f.add(ui, "selected", { keyValues: optMap() }).name("Select")
+    .onChange(v => { ui.name = (v || "").trim() || defaultName(); });
+  try { presetCtl.setValue(val); } catch {}
+};
+
+const save = () => {
+  const all = get();
+  const input = (ui.name || "").trim() || defaultName();
+
+  const baseline = (ui.selected && all[ui.selected]) ? all[ui.selected] : all[input];
+  if (sameVals(baseline, controls)) return; // unchanged
+
+  let final;
+  if (all[input]) {
+    const { base } = parseBase(input);
+    final = nextFreeNumbered(base);
+  } else {
+    final = input;
+  }
+
+  all[final] = { ...controls }; set(all);
+  ui.selected = final; ui.name = final;
+  rebuildSelect(final);
+};
+
+const apply = () => {
+  const p = get()[ui.selected]; if (!p) return;
+  Object.assign(controls, p); gui.updateDisplay();
+  ui.name = ui.selected || defaultName();
+};
+
+const del = () => {
+  const all = get();
+  if (!ui.selected || !all[ui.selected]) return;
+  delete all[ui.selected]; set(all);
+  ui.selected = ""; ui.name = defaultName();
+  rebuildSelect("");
+};
+
+const download = () => {
+  const all = get();
+  const chosen = ui.selected || (ui.name || "").trim() || defaultName();
+  const data = all[chosen] || { ...controls };
+  const blob = new Blob([JSON.stringify({ name: chosen, controls: data }, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = Object.assign(document.createElement("a"), { href: url, download: chosen.replace(/[^\w\-]+/g, "_") + ".json" });
+  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+};
+
+// --- Import (.json) into presets & apply immediately ---
+const importInput = Object.assign(document.createElement("input"), {
+  type: "file",
+  accept: "application/json",
+  style: "display:none"
+});
+document.body.appendChild(importInput);
+
+const upload = () => importInput.click();
+
+importInput.addEventListener("change", async (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const parsed = JSON.parse(text);
+
+    const incomingName = (parsed?.name ?? file.name.replace(/\.json$/i, "")).trim();
+    const payload = parsed?.controls ?? parsed ?? {};
+
+    const clean = { ...controls };
+    for (const k of Object.keys(payload)) {
+      if (k in controls) clean[k] = payload[k];
+    }
+
+    const all = get();
+    let final = incomingName || defaultName();
+    if (all[final]) {
+      const { base } = parseBase(final);
+      final = nextFreeNumbered(base || "Preset");
+    }
+    all[final] = { ...clean };
+    set(all);
+
+    ui.selected = final;
+    ui.name = final;
+    rebuildSelect(final);
+    Object.assign(controls, clean);
+    gui.updateDisplay();
+  } catch (err) {
+    console.error("Failed to import preset:", err);
+    alert("Import failed: invalid JSON or unexpected format.");
+  } finally {
+    importInput.value = "";
+  }
+});
+
+
+const f = gui.addFolder("Presets");
+f.add(ui, "name").name("Name").listen();
+f.add({ save }, "save").name("Save");
+f.add({ apply }, "apply").name("Apply");
+f.add({ del }, "del").name("Delete");
+f.add({ download }, "download").name("Download");
+f.add({ upload }, "upload").name("Import");  
+
+rebuildSelect("");
+
 
 const randomizeControls = () => {
   const rnd  = (a, b) => a + Math.random() * (b - a);
@@ -189,6 +321,8 @@ const randomizeControls = () => {
   controls.fbmLacunarity  = rnd(0.0, 20.0);
   controls.noiseABY       = rndi(0, 1);
   controls.noiseBBY       = rndi(0, 1);
+
+  gui.updateDisplay();
 };
 
 const shader = device.createShaderModule({
@@ -355,7 +489,7 @@ const shader = device.createShaderModule({
       let rings = smoothstep(u.ringsLo, u.ringsHi, vibes) * echo;
 
       // grid
-      let gridFreq = u.gridFreqBase + 16.0 * u.energy;
+      let gridFreq = u.gridFreqBase * u.energy;
       let g1 = abs(fract((p.x + 0.15*sin(bpmPhase*0.5)) * gridFreq) - 0.5);
       let g2 = abs(fract((p.y + 0.15*cos(bpmPhase*0.5)) * gridFreq) - 0.5);
       let gv = 0.5 - g1;

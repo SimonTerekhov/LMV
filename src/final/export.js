@@ -2,43 +2,42 @@ import { canvas, audioEl, gui } from "./webgpu.js";
 
 const downloadURL = (url, filename) => {
   const a = document.createElement("a");
-  a.href = url; a.download = filename;
-  document.body.appendChild(a); a.click();
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
   setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 100);
-}
+};
+
 const downloadBlob = (blob, filename) => {
   downloadURL(URL.createObjectURL(blob), filename);
-}
+};
 
 const savePNG = () => {
   canvas.toBlob((blob) => {
-    if (!blob) return;
     downloadBlob(blob, `frame_${Date.now()}.png`);
   }, "image/png");
-}
+};
 
-const getAudioStreamForRecording = async (audioEl) => {
-  if (!audioEl) return new MediaStream();
-  if (audioEl.captureStream) return audioEl.captureStream();
+const getAudioStreamForRecording = async (mediaEl) => {
+  if (!mediaEl) return new MediaStream();
 
-  const AudioCtx = window.AudioContext || window.webkitAudioContext;
-  const ac = new AudioCtx();
-  if (ac.state === "suspended") { try { await ac.resume(); } catch {} }
-  const src  = ac.createMediaElementSource(audioEl);
+  const ac = new AudioContext();
+  await ac.resume();
+
+  const src  = ac.createMediaElementSource(mediaEl);
   const dest = ac.createMediaStreamDestination();
+
   src.connect(ac.destination);
   src.connect(dest);
+
   return dest.stream;
-}
+};
 
-const recordClip = async (startAtSec, {
-  fps = 60,
-  durationSec = 10,
-  videoMbps = 40,
-  audioKbps = 320,
-} = {}) => {
-  const durationMs = durationSec * 1000;
-
+const recordClip = async (
+  startAtSec = 0,
+  { fps = 60, durationSec = 10, videoMbps = 40, audioKbps = 320 } = {}
+) => {
   const canvasStream = canvas.captureStream(fps);
   const audioStream  = await getAudioStreamForRecording(audioEl);
 
@@ -47,12 +46,8 @@ const recordClip = async (startAtSec, {
     ...audioStream.getAudioTracks(),
   ]);
 
-  const tryTypes = [
-    "video/webm;codecs=vp9,opus",
-    "video/webm;codecs=vp8,opus",
-    "video/webm",
-  ];
-  const mime = tryTypes.find(t => MediaRecorder.isTypeSupported(t)) || "";
+  const prefer = "video/webm;codecs=vp9,opus";
+  const mime = MediaRecorder.isTypeSupported(prefer) ? prefer : "video/webm";
 
   const rec = new MediaRecorder(mixed, {
     mimeType: mime,
@@ -61,37 +56,34 @@ const recordClip = async (startAtSec, {
   });
 
   const chunks = [];
-  rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
-  const done = new Promise(res => (rec.onstop = res));
+  rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
 
-  const hadAudio = !!audioEl;
+  const hadAudio   = !!audioEl;
   const wasPlaying = hadAudio && !audioEl.paused && !audioEl.ended;
   const prevTime   = hadAudio ? audioEl.currentTime : 0;
 
   if (hadAudio) {
-    if (Number.isFinite(startAtSec)) audioEl.currentTime = Math.max(0, startAtSec);
+    audioEl.currentTime = Math.max(0, startAtSec);
     await audioEl.play();
   }
 
+  const done = new Promise((res) => (rec.onstop = res));
   rec.start();
-  const timer = setTimeout(() => { try { rec.stop(); } catch {} }, durationMs);
+
+  setTimeout(() => rec.stop(), durationSec * 1000);
   await done;
-  clearTimeout(timer);
 
-  const blob = new Blob(chunks, { type: mime || "video/webm" });
-
-  downloadBlob(blob, `LMV.webm`);
+  downloadBlob(new Blob(chunks, { type: mime }), `LMV.webm`);
 
   if (hadAudio && !wasPlaying) {
     await audioEl.pause();
     audioEl.currentTime = prevTime;
   }
-}
+};
 
 const exportControls = {
   "Save PNG": () => savePNG(),
   duration: 10,
-
   "Record 10s @ Current Time": async () => {
     const start = audioEl?.currentTime || 0;
     await recordClip(start, {

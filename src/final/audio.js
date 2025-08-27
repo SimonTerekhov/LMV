@@ -6,14 +6,14 @@ export const AudioData = {
   lastBeatTime: 0,
   isOnset: 0,
   waveform: null,
-
   rmsZ: 0,
   bpm: 60,
   energy: 0,
   lowBand: 0,
+  tone: 0,
 };
 
-const fileInput = document.querySelector("#fileInput");
+const fileInput    = document.querySelector("#fileInput");
 const audioElement = document.querySelector("#audio");
 
 let audioContext;
@@ -26,24 +26,21 @@ let lastBeatTime = 0;
 let latestFeatures = null;
 let beatRAF = null;
 
-const ema = (prev, x, a) => (1 - a) * prev + a * x;
-const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
-const zscore = (x, m, s) => (s > 1e-6 ? (x - m) / s : 0);
-const median = (arr) => {
-  if (!arr.length) return 0;
+const ema     = (prev, x, a) => (1 - a) * prev + a * x;
+const clamp   = (x, a, b) => Math.min(b, Math.max(a, x));
+const zscore  = (x, m, s) => (s > 1e-6 ? (x - m) / s : 0);
+const median  = (arr) => {
   const a = [...arr].sort((x, y) => x - y);
   const m = Math.floor(a.length / 2);
   return a.length % 2 ? a[m] : 0.5 * (a[m - 1] + a[m]);
 };
 const sigmoid = (x) => 1 / (1 + Math.exp(-x));
-const lerp = (a, b, t) => a + (b - a) * t;
+const lerp    = (a, b, t) => a + (b - a) * t;
 
 const TrackProfile = { rmsEMA: 0, rmsEMASq: 0, rmsMean: 0, rmsStd: 0 };
 
 let rmsFast = 0, rmsSlow = 0, slowSq = 0;
-
 let onsetTimes = [];
-
 let warmupFrames = 0;
 const WARMUP_FRAMES = 360;
 
@@ -82,18 +79,16 @@ export const initAudio = () => {
 };
 
 const setupAudioContext = async () => {
-  if (meyda) meyda.stop();
+  meyda?.stop();
 
-    if (!sourceNode) {
-    sourceNode = audioContext.createMediaElementSource(audioElement);
-  } else {
-    try { sourceNode.disconnect(); } catch {}
-  }
+  sourceNode ||= audioContext.createMediaElementSource(audioElement);
+  sourceNode.disconnect?.();
+
   analyzer = audioContext.createAnalyser();
   analyzer.fftSize = 512;
 
   sourceNode.connect(analyzer);
-  analyzer.connect(audioContext.destination);
+  sourceNode.connect(audioContext.destination);
 
   meyda = Meyda.createMeydaAnalyzer({
     audioContext,
@@ -105,7 +100,7 @@ const setupAudioContext = async () => {
       AudioData.latestFeatures = features;
       warmupFrames++;
 
-      const rms = features.rms || 0;
+      const rms = features.rms;
       TrackProfile.rmsEMA   = ema(TrackProfile.rmsEMA,   rms, 0.02);
       TrackProfile.rmsEMASq = ema(TrackProfile.rmsEMASq, rms * rms, 0.02);
       TrackProfile.rmsMean  = TrackProfile.rmsEMA;
@@ -119,15 +114,18 @@ const setupAudioContext = async () => {
       const contrastZ = slowStd > 1e-6 ? (rmsFast - rmsSlow) / slowStd : 0;
       AudioData.energy = sigmoid(contrastZ * 3);
 
-      const sc = features.spectralCentroid || 0;
-      const normTone = clamp((Math.log2(Math.max(80, sc)) - Math.log2(80)) / (Math.log2(8000) - Math.log2(80)), 0, 1);
+      const sc = features.spectralCentroid;
+      const normTone = clamp(
+        (Math.log2(Math.max(80, sc)) - Math.log2(80)) /
+          (Math.log2(8000) - Math.log2(80)),
+        0, 1
+      );
       AudioData.tone = normTone;
-          
-      const spec = features.amplitudeSpectrum || [];
+
+      const spec = features.amplitudeSpectrum;
       let lows = 0;
       for (let i = 0; i < Math.min(8, spec.length); i++) lows += spec[i];
-      AudioData.lowBand = lows / (8 || 1);
-
+      AudioData.lowBand = lows / 8;
     },
   });
 
@@ -143,11 +141,11 @@ const detectBeats = () => {
   if (beatRAF) cancelAnimationFrame(beatRAF);
 
   const buffer = new Float32Array(512);
+  AudioData.waveform = new Float32Array(256);
 
   const process = () => {
     analyzer.getFloatTimeDomainData(buffer);
 
-    if (!AudioData.waveform) AudioData.waveform = new Float32Array(256);
     for (let i = 0; i < 256; i++) {
       const v = buffer[i * 2];
       AudioData.waveform[i] = v * 0.5 + 0.5;
@@ -155,6 +153,7 @@ const detectBeats = () => {
 
     const isOnset = aubioOnset.do(buffer);
     AudioData.isOnset = isOnset;
+
     const now = audioElement.currentTime;
 
     if (isOnset) {
@@ -171,9 +170,8 @@ const detectBeats = () => {
     }
 
     const minBeatInterval = 0.5 * (60 / (AudioData.bpm || 120));
-
     const warmedUp = warmupFrames > WARMUP_FRAMES;
-    const loudEnough = warmedUp && (AudioData.rmsZ || 0) > 0.3;
+    const loudEnough = warmedUp && AudioData.rmsZ > 0.3;
 
     if (isOnset && loudEnough && now - lastBeatTime > minBeatInterval) {
       lastBeatTime = now;
